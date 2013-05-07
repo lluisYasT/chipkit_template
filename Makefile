@@ -19,7 +19,7 @@ LDSCRIPT=core/chipKIT-MAX32-application-32MX795F512L.ld
 
 LDFLAGS=-Os -Wl,--gc-sections -mdebugger -mprocessor=$(CPUTYPE)
 
-CFLAGS=-O0 -c -mno-smart-io -w -fno-exceptions -ffunction-sections -fdata-sections \
+CFLAGS=-O0 -mno-smart-io -w -fno-exceptions -ffunction-sections -fdata-sections \
 			 -g -mdebugger -Wcast-align -fno-short-double -mprocessor=$(CPUTYPE) \
 			 -DF_CPU=80000000L -DARDUINO=23 -D_BOARD_MEGA_ -DMPIDEVER=0x01000202 \
 			 -DMPIDE=23 -Icore -Icore/variants/$(VARIANT) -Isrc
@@ -50,13 +50,22 @@ lib:
 	$(MAKE) -C lib
 
 %.o: %.S
-	$(CXX) $(CFLAGS) $< -o $@
+	$(CXX) $(CFLAGS) -c $< -o $@
 
 %.o: %.c
-	$(CC) $(CFLAGS) $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 %.o: %.cpp
-	$(CXX) $(CFLAGS) $< -o $@
+	$(CXX) $(CFLAGS) -c $< -o $@
+
+%.S: %.cpp
+	$(CXX) $(CFLAGS) -S $< -o $@
+
+%.ii: %.cpp
+	$(CXX) $(CFLAGS) -E $< -o $@
+
+%.i: %.c
+	$(CC) $(CFLAGS) -E $< -o $@
 
 link: $(OBJ_S) $(OBJ_C) $(OBJ_CPP)
 	$(MAKE) -C core

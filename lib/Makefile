@@ -1,11 +1,11 @@
-MPIDE=/opt/mpide
+#MPIDE=/opt/mpide
 TOOLCHAIN_PREFIX=$(MPIDE)/hardware/pic32/compiler/pic32-tools
 CC=$(TOOLCHAIN_PREFIX)/bin/pic32-gcc
 CXX=$(TOOLCHAIN_PREFIX)/bin/pic32-g++
 AR=$(TOOLCHAIN_PREFIX)/bin/pic32-ar
 
-CPUTYPE=32MX795F512L
-VARIANT=Max32
+#CPUTYPE=32MX795F512L
+#VARIANT=Max32
 
 CFLAGS=-O0 -c -mno-smart-io -w -fno-exceptions -ffunction-sections -fdata-sections \
 			 -g -mdebugger -Wcast-align -fno-short-double -mprocessor=$(CPUTYPE) \

@@ -1,4 +1,5 @@
-MPIDE=/opt/mpide
+MPIDE:=/opt/mpide
+export MPIDE
 TOOLCHAIN_PREFIX=$(MPIDE)/hardware/pic32/compiler/pic32-tools
 CC=$(TOOLCHAIN_PREFIX)/bin/pic32-gcc
 CXX=$(TOOLCHAIN_PREFIX)/bin/pic32-g++
@@ -13,8 +14,10 @@ AVRDUDE=/usr/bin/avrdude
 AVRDUDECONF=$(MPIDE)/hardware/tools/avrdude.conf
 AVRDUDEFLAGS=-C$(AVRDUDECONF) -c stk500v2 -p pic32 -P $(SERIAL_PORT) -b 115200 -v -U
 
-CPUTYPE=32MX795F512L
-VARIANT=Max32
+CPUTYPE:=32MX795F512L
+export CPUTYPE
+VARIANT:=Max32
+export VARIANT
 LDSCRIPT=core/chipKIT-MAX32-application-32MX795F512L.ld
 
 LDFLAGS=-Os -Wl,--gc-sections -mdebugger -mprocessor=$(CPUTYPE)

@@ -56,16 +56,22 @@
 //*	Sep  1,	2011	<MLS> Issue #111, #ifdefs around <plib.h>, it was being included twice
 //*	Nov  1,	2011	<MLS> Issue #140, HardwareSerial not derived from Stream 
 //*	Nov  1,	2011	<MLS> Also fixed some other compatibilty issues
-//* Nov 12, 2001	<GeneApperson> Rewrite for board variant support
+//* Nov 12, 2012	<GeneApperson> Rewrite for board variant support
+//* Sep  8, 2012    <BrianSchmalz> Fix dropping bytes on USB RX bug
+//*	Jul 26, 2012	<GeneApperson> Added PPS support for PIC32MX1xx/MX2xx devices 
+//* Nov 23, 2012    <BrianSchmalz> Auto-detect when to use BRGH = 1 (high baud rates)
+//*	Feb  6, 2013	<GeneApperson> Removed dependencies on the Microchip plib library
 //************************************************************************
+#if !defined(__LANGUAGE_C__)
 #define __LANGUAGE_C__
-
+#endif
 
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
 
-#include <plib.h>
+#include <p32xxxx.h>
+#include <sys/attribs.h>
 
 #include "wiring.h"
 #include "wiring_private.h"
@@ -83,7 +89,8 @@
 /* ------------------------------------------------------------ */
 /*			General Declarations								*/
 /* ------------------------------------------------------------ */
-
+// Baud rate above which we use high baud divisor (BRGH = 1)
+#define LOW_HIGH_BAUD_SPLIT     200000
 
 /* ------------------------------------------------------------ */
 /*			HardwareSerial Object Class Implementation			*/
@@ -108,15 +115,26 @@
 **		any global variables used by the object.
 */
 
-HardwareSerial::HardwareSerial(p32_uart * uartP, int irqP, int vecP, int iplP, int splP)
+#if defined(__PIC32MX1XX__) || defined(__PIC32MX2XX__)
+HardwareSerial::HardwareSerial(p32_uart * uartT, int irqT, int vecT, int iplT, int splT, int pinT, int pinR, ppsFunctionType ppsT, ppsFunctionType ppsR)
+#else
+HardwareSerial::HardwareSerial(p32_uart * uartT, int irqT, int vecT, int iplT, int splT)
+#endif
 {
-	uart = uartP;
-	irq  = irqP;
-	vec  = vecP;
-	irq  = (uint8_t)irqP;
-	vec  = (uint8_t)vecP;
-	ipl  = (uint8_t)iplP;
-	spl  = (uint8_t)splP;
+	uart = uartT;
+	irq  = irqT;
+	vec  = vecT;
+	irq  = (uint8_t)irqT;
+	vec  = (uint8_t)vecT;
+	ipl  = (uint8_t)iplT;
+	spl  = (uint8_t)splT;
+
+#if defined(__PIC32MX1XX__) || defined(__PIC32MX2XX__)
+	pinTx = (uint8_t)pinT;
+	pinRx = (uint8_t)pinR;
+	ppsTx = ppsT;
+	ppsRx = ppsR;
+#endif
 
 	/* The interrupt flag and enable control register addresses and
 	** the bit numbers for the flag bits can be computed from the
@@ -166,20 +184,19 @@ void HardwareSerial::begin(unsigned long baudRate)
 	*/
 	flush();
 
-	/* Compute the address of the interrupt priority control
-	** registers used by this UART
+#if defined(__PIC32MX1XX__) || defined(__PIC32MX2XX__)
+	/* Map the UART TX to the appropriate pin.
 	*/
-	ipc = ((p32_regset *)&IPC0) + (vec / 4);	//interrupt priority control reg set
+    mapPps(pinTx, ppsTx);
 
-	/* Compute the number of bit positions to shift to get to the
-	** correct position for the priority bits for this IRQ.
+	/* Map the UART RX to the appropriate pin.
 	*/
-	irq_shift = 8 * (vec % 4);
+    mapPps(pinRx, ppsRx);
+#endif
 
 	/* Set the interrupt privilege level and sub-privilege level
 	*/
-	ipc->clr = 	(0x1F << irq_shift);
-	ipc->set = ((ipl << 2) + spl) << irq_shift;
+	setIntPriority(vec, ipl, spl);
 
 	/* Clear the interrupt flags, and set the interrupt enables for the
 	** interrupts used by this UART.
@@ -190,13 +207,21 @@ void HardwareSerial::begin(unsigned long baudRate)
 	iec->set = bit_rx;						//enable rx interrupts
 
 	/* Initialize the UART itself.
-	*/
-	//	http://www.chipkit.org/forum/viewtopic.php?f=7&t=213&p=948#p948
-	uart->uxBrg.reg	 = ((__PIC32_pbClk / 16 / baudRate) - 1);	// calculate actual BAUD generate value.
+	**	http://www.chipkit.org/forum/viewtopic.php?f=7&t=213&p=948#p948
+    ** Use high baud rate divisor for bauds over LOW_HIGH_BAUD_SPLIT
+    */
 	uart->uxSta.reg = 0;
-	uart->uxMode.reg = (1 << _UARTMODE_ON);			//enable UART module
-	uart->uxSta.reg  = (1 << _UARTSTA_UTXEN) + (1 << _UARTSTA_URXEN);	//enable transmitter and receiver
-
+    if (baudRate < LOW_HIGH_BAUD_SPLIT)
+    {
+        uart->uxBrg.reg    = ((__PIC32_pbClk / 16 / baudRate) - 1);      // calculate actual BAUD generate value.
+        uart->uxMode.reg = (1 << _UARTMODE_ON);                          // enable UART module
+    }
+    else
+    {
+        uart->uxBrg.reg    = ((__PIC32_pbClk / 4 / baudRate) - 1);       // calculate actual BAUD generate value.
+        uart->uxMode.reg = (1 << _UARTMODE_ON) | (1 << _UARTMODE_BRGH);  // enable UART module
+    }
+    uart->uxSta.reg  = (1 << _UARTSTA_UTXEN) + (1 << _UARTSTA_URXEN);    // enable transmitter and receiver
 }
 
 /* ------------------------------------------------------------ */
@@ -453,21 +478,30 @@ void HardwareSerial::doSerialInt(void)
 
 ring_buffer rx_bufferUSB = { { 0 }, 0, 0 };
 
+#define     USBSerialBufferFree()     (((RX_BUFFER_SIZE - 1) + rx_bufferUSB.tail - rx_bufferUSB.head) % RX_BUFFER_SIZE)
+
 //*******************************************************************************************
-inline void store_char(unsigned char theChar, ring_buffer *rx_buffer)
+// Return TRUE if we could take the character, return FALSE if there wasn't room
+inline boolean store_char(unsigned char theChar, ring_buffer *rx_buffer)
 {
 int	bufIndex;
 
+    // Compute the place where we want to store this byte - one beyond the head
 	bufIndex	= (rx_buffer->head + 1) % RX_BUFFER_SIZE;
 
-	// if we should be storing the received character into the location
-	// just before the tail (meaning that the head would advance to the
-	// current location of the tail), we're about to overflow the buffer
-	// and so we don't write the character or advance the head.
+    // If the place where we are about to store the character is the tail, then
+    // we would overflow the buffer if we put our character there. This is because
+    // if head = tail, the buffer is empty. If head = tail-1, then the buffer
+    // is full. So only write into the buffer if we are not writing at the tail.
 	if (bufIndex != rx_buffer->tail)
 	{
 		rx_buffer->buffer[rx_buffer->head]	=	theChar;
 		rx_buffer->head	=	bufIndex;
+        return(true);
+	}
+    else
+    {
+        return(false);
 	}
 }
 
@@ -478,14 +512,26 @@ void	USBresetRoutine(void)
 }
 
 //****************************************************************
+// Need to return FALSE if we need USB to hold off for awhile
 boolean	USBstoreDataRoutine(const byte *buffer, int length)
 {
-unsigned int	ii;
+    unsigned int	i;
 
-	for (ii=0; ii<length; ii++)
+    // Put each byte into the serial recieve buffer
+    for (i=0; i<length; i++)
 	{
-		store_char(buffer[ii], &rx_bufferUSB);
+        store_char(buffer[i], &rx_bufferUSB);
 	}
+    // If there isn't going to be enough space for a whole nother buffer, then return
+    // false so USB will NAK and we won't get any more data.
+    if (USBSerialBufferFree() < USB_SERIAL_MIN_BUFFER_FREE)
+    {
+        return(false);
+    }
+    else
+    {
+        return(true);
+    }
 }
 
 
@@ -517,7 +563,7 @@ void USBSerial::begin(unsigned long baudRate)
 	DebugViaSerial0("returned from cdcacm_register");
 
 	// Must enable glocal interrupts - in this case, we are using multi-vector mode
-	INTEnableSystemMultiVectoredInt();
+	//INTEnableSystemMultiVectoredInt();
 	DebugViaSerial0("INTEnableSystemMultiVectoredInt");
 
 }
@@ -552,7 +598,7 @@ int USBSerial::read(void)
 {
 	unsigned char theChar;
 
-	// if the head isn't ahead of the tail, we don't have any characters
+	// If the head = tail, then the buffer is empty, so nothing to read
 	if (_rx_buffer->head == _rx_buffer->tail)
 	{
 		return -1;
@@ -561,6 +607,14 @@ int USBSerial::read(void)
 	{
 		theChar				=	_rx_buffer->buffer[_rx_buffer->tail];
 		_rx_buffer->tail	=	(_rx_buffer->tail + 1) % RX_BUFFER_SIZE;
+        
+        // If we just made enough room for the next packet to fit into our buffer,
+        // start the packets flowing from the PC again
+        if (USBSerialBufferFree() >= USB_SERIAL_MIN_BUFFER_FREE)
+        {
+            cdcacm_command_ack();
+        }
+        
 		return (theChar);
 	}
 }
@@ -858,21 +912,35 @@ void __ISR(_SER7_VECTOR, _SER7_IPL_ISR) IntSer7Handler(void)
 */
 USBSerial		Serial(&rx_bufferUSB);
 #if defined(_SER0_BASE)
+#if defined(__PIC32MX1XX__) || defined(__PIC32MX2XX__)
+HardwareSerial Serial0((p32_uart *)_SER0_BASE, _SER0_IRQ, _SER0_VECTOR, _SER0_IPL, _SER0_SPL, _SER0_TX_PIN, _SER0_RX_PIN, _SER0_TX_OUT, _SER0_RX_IN);
+#else
 HardwareSerial Serial0((p32_uart *)_SER0_BASE, _SER0_IRQ, _SER0_VECTOR, _SER0_IPL, _SER0_SPL);
+#endif
 #endif
 
 #else
 /* If we're not using USB for serial, then hardware serial port 0
 ** gets instantiated as Serial.
+** NOTE: PIC32MX1xx/2xx devices only have 2 UARTS, so we're not defining more variant
+** object instances for those devices.
 */
 #if defined(_SER0_BASE)
+#if defined(__PIC32MX1XX__) || defined(__PIC32MX2XX__)
+HardwareSerial Serial((p32_uart *)_SER0_BASE, _SER0_IRQ, _SER0_VECTOR, _SER0_IPL, _SER0_SPL, _SER0_TX_PIN, _SER0_RX_PIN, _SER0_TX_OUT, _SER0_RX_IN);
+#else
 HardwareSerial Serial((p32_uart *)_SER0_BASE, _SER0_IRQ, _SER0_VECTOR, _SER0_IPL, _SER0_SPL);
+#endif
 #endif
 
 #endif	//defined(_USB) && defined(_USE_USB_FOR_SERIAL_)
 
 #if defined(_SER1_BASE)
+#if defined(__PIC32MX1XX__) || defined(__PIC32MX2XX__)
+HardwareSerial Serial1((p32_uart *)_SER1_BASE, _SER1_IRQ, _SER1_VECTOR, _SER1_IPL, _SER1_SPL, _SER1_TX_PIN, _SER1_RX_PIN, _SER1_TX_OUT, _SER1_RX_IN);
+#else
 HardwareSerial Serial1((p32_uart *)_SER1_BASE, _SER1_IRQ, _SER1_VECTOR, _SER1_IPL, _SER1_SPL);
+#endif
 #endif
 
 #if defined(_SER2_BASE)

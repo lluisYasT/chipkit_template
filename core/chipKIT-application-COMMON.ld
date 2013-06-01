@@ -538,14 +538,14 @@ SECTIONS
     . += (DEFINED (_DEBUGGER) ? 0x200 : 0x0);
   } >kseg1_data_mem
   
-  .ram_exchange_data :
+  .ram_exchange_data (NOLOAD) :
   {
     _ram_header_addr = . ;
     . += 8 ;
   } >kseg1_data_mem
 
   /* Persistent data */
-  .persist ALIGN(4) :
+  .persist ALIGN(4) (NOLOAD) :
   {
     _persist_begin = .;
     *(.persist .persist.*)
@@ -559,7 +559,7 @@ SECTIONS
   _protected_end = ((_IMAGE_TYPE & (_imageSplitFlashBootloader | _imageProgramFlashBootloader | _imageBootFlashBootloader)) != 0) ? (ORIGIN(kseg1_data_mem) + 0x600) : . ;
 
   .data  _protected_end :
-  { 
+  {
     _data_begin = . ;
     *(.data .data.* .gnu.linkonce.d.*)
     KEEP (*(.gnu.linkonce.d.*personality*))

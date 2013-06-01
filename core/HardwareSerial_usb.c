@@ -18,7 +18,8 @@
 //************************************************************************
 
 
-#include <plib.h>
+#include <p32xxxx.h>
+#include <sys/attribs.h>
 
 #include	"HardwareSerial.h"
 
@@ -27,7 +28,8 @@
 
 #include <stdarg.h>
 #include <stdint.h>
-
+#include <stddef.h>
+#include <sys/kmem.h>
 
 #include	"HardwareSerial_usb.h"
 #include	"HardwareSerial_cdcacm.h"
@@ -338,11 +340,16 @@ static byte configuration[CONFIGURATION_DESCRIPTOR_SIZE];
 	
 	assert(! usb_in_isr);
 	assert((usb_in_isr	=	true) ? true : true);
+    assert((usb_in_ticks = ticks) ? true : true);
 	
 #ifdef _USE_USB_IRQ_
+#if defined(__PIC32MX2XX__)
+    /// TODO: Plib replacement function should go here
+    IFS1CLR	=	0x00000008; // USBIF
+#else
 	IFS1CLR	=	0x02000000; // USBIF
 #endif
-	
+#endif	
 	// *** device ***
 	
 	// if we just transferred a token...
@@ -359,7 +366,7 @@ static byte configuration[CONFIGURATION_DESCRIPTOR_SIZE];
 		int endpoint2;
 		short length;
 		short value;
-		struct bdt *bdt;
+		volatile struct bdt *bdt;
 		struct setup *setup;
 		
 		// we just completed a packet transfer
@@ -751,9 +758,16 @@ void	usb_initialize(void)
 
 	// enable int
 #ifdef _USE_USB_IRQ_
+#if defined(__PIC32MX2XX__)
+    /// TODO: Plib replacement function should go here
+	IEC1bits.USBIE = 1;
+    IPC7bits.USBIP = 6;
+    IPC7bits.USBIS = 0;
+#else
 	IEC1bits.USBIE = 1;
 	IPC11bits.USBIP = 6;
 	IPC11bits.USBIS = 0;
+#endif
 #endif
 
 	MCF_USB_OTG_SOF_THLD = 74;

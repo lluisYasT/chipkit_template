@@ -42,41 +42,25 @@
 //* Jan  9, 2012    <KeithV> Added CoreTimer Services to the CoreTimerHandler and fixed bugs where CT would be missed.
 //                  Also fixed write_comp() inline assembler
 //                  Also added countdown debug mask to stop the core timer when debugging.
+//* Jun  1, 2012    <BPS> Added SoftReset() for software bootload
+//	Feb  6, 2013	<GeneApperson> Removed dependencies on the Microchip plib library
 //************************************************************************
-#include <plib.h>
+
 #include <p32xxxx.h>
+#include <sys/attribs.h>
 
 #define	OPT_SYSTEM_INTERNAL
 #define OPT_BOARD_INTERNAL	//pull in internal symbol definitons
-#include "p32_defs.h"
 #include "pins_arduino.h"
+#include "p32_defs.h"
 
 #include "wiring_private.h"
-//#define _ENABLE_PIC_RTC_
 
+#undef _ENABLE_PIC_RTC_
 
-//*	as per Al.Rodriguez@microchip.com, Jan 7, 2011
-//*	Add the following so the secondary oscillator is disabled and the port can be used as an IO PORT.
-//#pragma config FSOSCEN = OFF
-
-//#pragma config POSCMOD=XT, FNOSC=PRIPLL
-//#pragma config FPLLIDIV=DIV_2, FPLLMUL=MUL_20, FPLLODIV=DIV_1
-//#pragma config FPBDIV=DIV_2, FWDTEN=OFF, CP=OFF, BWP=OFF
-
-
-#pragma config FPLLODIV	=	DIV_1
-#pragma config FPLLMUL	=	MUL_20
-#pragma config FPLLIDIV	=	DIV_2
-#pragma config FWDTEN	=	OFF
-#pragma config FCKSM	=	CSECME
-#pragma config FPBDIV	=	DIV_1
-#pragma config OSCIOFNC	=	ON
-#pragma config POSCMOD	=	XT
-#pragma config FSOSCEN	=	OFF
-#pragma config FNOSC	=	PRIPLL
-#pragma config CP		=	OFF
-#pragma config BWP		=	OFF
-#pragma config PWP		=	OFF
+//************************************************************************
+//*	This sets the MPIDE version number in the image header as defined in the linker script
+extern const uint32_t __attribute__((section(".mpide_version"))) _verMPIDE_Stub = MPIDEVER;    // assigns the build number in the header section in the image
 
 //************************************************************************
 //*	globals
@@ -113,6 +97,9 @@ volatile unsigned long gMicros_calculating		=	0;
 // SoftPWM library update function pointer
 uint32_t (*gSoftPWMServoUpdate)(void) = NULL;
 
+// PPS lock variable
+uint8_t ppsGlobalLock = false;
+
 //************************************************************************
 unsigned long millis()
 {
@@ -132,25 +119,23 @@ unsigned long millis()
 //************************************************************************
 unsigned long micros()
 {
-unsigned int cur_timer_val	=	0;
-unsigned int micros_delta	=	0;
+	uint32_t	st;
+	unsigned int cur_timer_val	=	0;
+	unsigned int micros_delta	=	0;
 
 	unsigned int result;
 	
-	INTDisableInterrupts();
+	st = disableInterrupts();
 	result = gTimer0_millis * 1000;
 	cur_timer_val = ReadCoreTimer();
 	cur_timer_val -= gCore_timer_last_val;
 	cur_timer_val += CORETIMER_TICKS_PER_MICROSECOND/2;  // rounding
 	cur_timer_val /= CORETIMER_TICKS_PER_MICROSECOND;  // convert to microseconds
-	INTEnableInterrupts();
+	restoreInterrupts(st);
 	return (result + cur_timer_val);
 
 }
 
-//#define mCTClearIntFlag()					(IFS0CLR = _IFS0_CTIF_MASK)
-//#define mCTGetIntFlag()					 (IFS0bits.CTIF)
-//#define GetSystemClock() (80000000ul)
 //************************************************************************
 // Delay for a given number of milliseconds.
 void delay(unsigned long ms)
@@ -182,6 +167,7 @@ unsigned long	startMicros	=	micros();
 void init()
 {
 
+#if defined(DEAD)
 #ifdef _ENABLE_PIC_RTC_
 	// Configure the device for maximum performance but do not change the PBDIV
 	// Given the options, this function will change the flash wait states, RAM
@@ -191,36 +177,49 @@ void init()
 #else
 	__PIC32_pbClk	=	SYSTEMConfigPerformance(F_CPU);
 #endif
+#endif
 
+	// Configure the processor for the proper number of wait states and caching.
+	_configSystem(F_CPU);
 
-	OpenCoreTimer(CORE_TICK_RATE);
+	// Enable multi-vector interrupts
+	_enableMultiVectorInterrupts();
 
-	// set up the core timer interrupt with a prioirty of 2 and zero sub-priority
-	mConfigIntCoreTimer(CT_INT_ON | _CT_IPL_IPC | (_CT_SPL_IPC << 4));
+	// Initialize the core timer for use to maintain the system timer tick.
+	_initCoreTimer(CORE_TICK_RATE);
+	setIntPriority(_CORE_TIMER_VECTOR, _CT_IPL_IPC, _CT_SPL_IPC);
+	setIntEnable(_CORE_TIMER_IRQ);
 
-	// enable multi-vector interrupts
-	INTEnableSystemMultiVectoredInt();
+	// Save the peripheral bus frequency for later use.
+	__PIC32_pbClk = getPeripheralClock();
 
+   // allow for debugging, this will stop the core timer when the debugger takes control
+    _CP0_BIC_DEBUG(_CP0_DEBUG_COUNTDM_MASK); 
 
+#if defined(DEAD)
 #ifdef _ENABLE_PIC_RTC_
 	RtccInit();									// init the RTCC
 //	while(RtccGetClkStat() != RTCC_CLK_ON);		// wait for the SOSC to be actually running and RTCC to have its clock source
 												// could wait here at most 32ms
 
-   // allow for debugging, this will stop the core timer when the debugger takes control
-    _CP0_BIC_DEBUG(_CP0_DEBUG_COUNTDM_MASK); 
-
-	delay(50);
 	// time is MSb: hour, min, sec, rsvd. date is MSb: year, mon, mday, wday.
 	RtccOpen(0x10073000, 0x11010901, 0);
 	RtccSetTimeDate(0x10073000, 0x10101701);
 	// please note that the rsvd field has to be 0 in the time field!
 #endif
+#endif
 
+	delay(50);
 
 	//*	as per Al.Rodriguez@microchip.com, Jan 7, 2011
 	//*	Disable the JTAG interface.
+#if defined(__PIC32MX1XX__) || defined(__PIC32MX2XX__)
+	CFGCONbits.JTAGEN = 0;
+	//CFGCONbits.TDOEN = 0;
+	//OSCCONbits.SOSCEN = 0;
+#else
 	DDPCONbits.JTAGEN	=	0;
+#endif
 
 
 #if (OPT_BOARD_INIT != 0)
@@ -240,34 +239,159 @@ void	_board_init(void);
 #endif
 }
 
-
-
 //************************************************************************
-//*	Interrupts are enabled by setting the IE bit in the status register
-//************************************************************************
-unsigned int __attribute__((nomips16))  INTEnableInterrupts(void)
+//*		PPS - Peripheral Pin Select - Functions
+//*
+/* Currently, PPS is only available in PIC32MX1xx/PIC32MX2xx devices.
+*/
+#if defined(__PIC32MX1XX__) || defined(__PIC32MX2XX__)
+
+// Locks all PPS functions so that calls to mapPpsInput() or mapPpsOutput() always fail.
+// You would use this function if you set up all of your PPS settings at the beginning
+// of your sketch, and then wanted to prevent any changes while running the rest of the
+// sketch. Can be unlocked with unlockPps().
+void lockPps()
 {
-    unsigned int status = 0;
-
-    asm volatile("ei    %0" : "=r"(status));
-
-    return status;
+    ppsGlobalLock = true;
 }
 
-
-//************************************************************************
-//*	Interrupts are disabled by clearing the IE bit in the status register
-//************************************************************************
-unsigned int __attribute__((nomips16)) INTDisableInterrupts(void)
+// Once the PPS system has been locked with logkPps(), this function will unlock it.
+// Use this function before making any changes with mapPpsInput() or mapPpsOutput()
+// functions.
+void unlockPps()
 {
-    unsigned int status = 0;
-
-    asm volatile("di    %0" : "=r"(status));
-
-    return status;
+    ppsGlobalLock = false;
 }
 
+// Use this function to connect up a input or output function (peripheral) with a 
+// digitial pin.
+// <pin> : Digital pin to connect
+// <func> : Input or output name from ppsFunctionType enum (see p32_defs.h)
+// Note that this function will fail if the pps system is locked, or if
+// <pin> can't be mapped to <func>. There are only certain pins (up to 8)
+// that can be mapped ro each <func>.
+boolean mapPps(uint8_t pin, ppsFunctionType func)
+{
+	p32_ppsin *		pps;
 
+    // if the pps system is locked, then don't do anything
+    if (ppsGlobalLock)
+    {
+        return false;
+    }
+    
+    if (!isPpsPin(pin))
+    {
+        return false;
+    }
+
+    // Check for valid PPS pin number and valid function number (input or output)
+	if (
+        !isPpsPin(pin) 
+        || 
+        ((ppsInputFromFunc(func) > NUM_PPS_IN) && ppsFuncIsInput(func))
+        ||
+        ((ppsOutputFromFunc(func) > NUM_PPS_OUT) && ppsFuncIsOutput(func))
+    )
+	{
+		return false;
+	}
+
+	/* Check if the requested peripheral input can be mapped to
+	** the requested pin.
+	*/
+	if ((ppsSetFromPin(pin) & ppsSetFromFunc(func)) == 0)
+	{
+		return false;
+	}
+
+    if (ppsFuncIsInput(func))
+    {
+	/* An input is mapped from the pin to the peripheral input
+	** function by storing the select value into the register associated
+	** with the peripheral function.
+	*/
+	pps = ppsInputRegister(func);
+	*pps = ppsInputSelect(pin);
+	}
+    else
+	{
+
+	/* An output is mapped by storing the select value for the output function
+	** being mapped into the mapping register associated with the pin.
+	*/
+	pps = ppsOutputRegister(pin);
+	*pps = ppsOutputSelect(func);
+   }
+	return true;
+	
+}
+
+#endif	// defined(__PIC32MX1XX__) || defined(__PIC32MX2XX__)
+
+//************************************************************************
+//*	Deal with the 'virtual' program button and SoftReset(). This allows
+//* a sketch to cause the board to reboot, and either force entry into
+//* the bootloader, or not.
+//* Will return FALSE if ENTER_BOOTLOADER_ON_BOOT is not suppored.
+//* On return of FALSE, no registers or latches will have been disturbed.
+//* RUN_SKETCH_ON_BOOT is always supported.
+//************************************************************************
+
+unsigned int executeSoftReset(uint32_t options)
+{
+    const IMAGE_HEADER_INFO * pImageHeader = getImageHeaderInfoStructure();
+
+    // We will use the LAT bit of the program button (if the board has one)
+    // as the 'virutal' program button. The bootloader will read this bit
+    // upon boot (only after a software reset) to see if it should go into
+    // bootload mode or just run the sketch.
+
+ #if  (USE_VIRTUAL_PROGRAM_BUTTON == 1)
+
+    // Set/clear the LAT bit
+    if (options == ENTER_BOOTLOADER_ON_BOOT)
+    {
+        // lets see if the bootloader has the capability to do this.
+        // if we can not support this, make sure we have NOT fooled with any TRIS or Program buttons, do not disturb things
+        // because we will not be resetting.
+        if( ((pImageHeader->bootloaderCapabilities & blCapNotProvided) == blCapNotProvided)  ||  
+            ((pImageHeader->bootloaderCapabilities & blCapVirtualProgramButton) != blCapVirtualProgramButton) )
+        {   
+            return(false);
+        }
+      
+        VIRTUAL_PROGRAM_BUTTON_TRIS = 1;    // Set virtual program button to be an input (should be already)
+        VIRTUAL_PROGRAM_BUTTON = 1;         // Set to stay in the bootloader
+    }
+    else
+    {
+        // Set virtual program button to be an input (should be already)
+        VIRTUAL_PROGRAM_BUTTON_TRIS = 1;    // Set virtual program button to be an input (should be already)
+        VIRTUAL_PROGRAM_BUTTON = 0;         // Set to jump to application
+    }
+
+#else       // No virtual program button
+    // if we don't have virtual program buttons, we can't stay in the bootloader
+    if (options == ENTER_BOOTLOADER_ON_BOOT)
+    {
+        return(false);
+    }
+#endif  // end virtual program button
+ 
+    // At this point either we have a virtual program buttons and we can support ENTER_BOOTLOADER_ON_BOOT
+    // or we just want to soft reset. A RUN_SKETCH_ON_BOOT soft reset requires no special funcitonality in the bootloader.
+    // so we can always do a RUN_SKETCH_ON_BOOT.
+
+    // Always clear the EXTR bit to make sure we don't read the real program 
+    // button on boot
+    RCONbits.EXTR = 0;
+    
+    // Now perform the software reset
+    _softwareReset();
+
+    return(true);       // never will be executed.
+}
 
 //************************************************************************
 //*	CoreTimerHandler Services (KeithV)
@@ -318,6 +442,7 @@ uint32_t millisecondCoreTimerService(uint32_t curTime);
 #define write_comp(src) __asm__ __volatile__("mtc0 %0,$11" : : "r" (src))
 
 #define mCTSetIntFlag() (IFS0SET = _IFS0_CTIF_MASK)
+#define mCTClearIntFlag() (IFS0CLR = _IFS0_CTIF_MASK)
 
 typedef  uint32_t (*CoreTimerService)(uint32_t);
 

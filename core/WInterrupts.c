@@ -31,10 +31,12 @@
 //* Aug  8, 2011	<GeneApperson> completely rewritten (issue #75)
 //* Aug 30, 2011    <GeneApperson> clear interrupt flag after return from
 //*                     user interrupt function (issue #109)
+//*	Jul 26, 2012	<GeneApperson> Added PPS support for PIC32MX1xx/MX2xx devices
+//	Feb  6, 2012	<GeneApperson> Removed dependencies on the Microchip plib library
 //************************************************************************
 
-#include <plib.h>
 #include <p32xxxx.h>
+#include <sys/attribs.h>
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -61,6 +63,25 @@ void attachInterrupt(uint8_t interruptNum, void (*userFunc)(void), int mode)
 	if ((interruptNum < NUM_EXTERNAL_INTERRUPTS) && ((mode == FALLING)||(mode == RISING)))
 	{
 	    intFunc[interruptNum]	=	userFunc;
+
+#if defined(__PIC32MX1XX__) || defined(__PIC32MX2XX__)
+		/* For devices with peripheral pin select (PPS), it is necessary to
+		** map the input function to the pin. This is done by loading the
+		** PPS input select register for the specific interrupt with the value
+		** to select the pin that the interrupt is mapped to as defined by the
+		** board variant file.
+		*/
+		volatile uint32_t *	pps;
+		uint8_t		pin;
+		uint8_t		sel;
+
+		if ((sel = externalIntToInputSelect(interruptNum)) != NOT_PPS_PIN)
+		{
+			pin = externalIntToDigitalPin(interruptNum);
+			pps = ppsInputRegister(sel);
+			*pps = ppsInputSelect(pin);
+		}
+#endif
 
 		// The active edge is selected via the INTxEP bits in the INTCON register.
 		// A '0' bit selects falling edge, and a '1' bit select rising edge.

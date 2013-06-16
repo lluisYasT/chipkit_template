@@ -1,4 +1,4 @@
-MPIDE:=/opt/mpide
+MPIDE:=/home/lluis/mpide
 export MPIDE
 TOOLCHAIN_PREFIX=$(MPIDE)/hardware/pic32/compiler/pic32-tools
 CC=$(TOOLCHAIN_PREFIX)/bin/pic32-gcc
@@ -18,7 +18,9 @@ CPUTYPE:=32MX795F512L
 export CPUTYPE
 VARIANT:=Max32
 export VARIANT
-LDSCRIPT=core/chipKIT-MAX32-application-32MX795F512L.ld
+
+LDSCRIPT_COMMON=core/chipKIT-application-COMMON.ld
+LDSCRIPT=core/chipKIT-application-32MX795F512L.ld
 
 LDFLAGS=-Os -Wl,--gc-sections -mdebugger -mprocessor=$(CPUTYPE)
 
@@ -74,8 +76,7 @@ link: $(OBJ_S) $(OBJ_C) $(OBJ_CPP)
 	$(MAKE) -C core
 	$(MAKE) -C lib
 	$(LD) $(LDFLAGS) -o bin/main.elf $(OBJ_S) $(OBJ_C) $(OBJ_CPP) \
-		core/core.a lib/libs.a -Lcore -lm -T $(LDSCRIPT) 
-
+		core/core.a lib/libs.a -Lcore -lm -T $(LDSCRIPT) -T$(LDSCRIPT_COMMON) 
 hex: link
 	$(OBJCPY) -O ihex -j .eeprom --set-section-flags=.eeprom=alloc,load \
 		--no-change-warnings --change-section-lma .eeprom=0 bin/main.elf bin/main.eep

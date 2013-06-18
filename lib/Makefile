@@ -12,7 +12,7 @@ CFLAGS=-O0 -c -mno-smart-io -w -fno-exceptions -ffunction-sections -fdata-sectio
 			 -DF_CPU=80000000L -DARDUINO=23 -D_BOARD_MEGA_ -DMPIDEVER=0x01000202 \
 			 -DMPIDE=23 -I../core/variants/$(VARIANT) -I../core 
 
-LIBS=$(shell ls -d */)
+LIBS=$(shell ls -d */**/)
 CFLAGS+=$(patsubst %,-I%,$(LIBS))
 
 SRC_C=$(wildcard **/**/*.c) 

@@ -20,7 +20,7 @@ VARIANT:=Max32
 export VARIANT
 
 LDSCRIPT_COMMON=core/chipKIT-application-COMMON.ld
-LDSCRIPT=core/chipKIT-application-32MX795F512L.ld
+LDSCRIPT=core/chipKIT-application-32MX795F512.ld
 
 LDFLAGS=-Os -Wl,--gc-sections -mdebugger -mprocessor=$(CPUTYPE)
 

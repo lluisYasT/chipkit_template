@@ -33,7 +33,8 @@ $(OBJ_CPP): $(SRC_CPP)
 	$(CXX) $(CFLAGS) $< -o $@
 
 libs.a: $(OBJ_S) $(OBJ_C) $(OBJ_CPP)
-	$(AR) rcs libs.a $(OBJ_C) $(OBJ_CPP)
+	$(AR) rcs libs.a $(OBJ_C)
+	$(AR) rcs libs.a $(OBJ_CPP)
 
 .PHONY: clean
 clean:

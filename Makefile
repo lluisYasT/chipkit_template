@@ -87,7 +87,7 @@ load: hex
 
 .PHONY: clean
 clean:
-	-rm src/*.o
+	-rm src/{*.o,*.i,*.ii}
 	-rm bin/*
 	$(MAKE) -C core clean
 	$(MAKE) -C lib clean

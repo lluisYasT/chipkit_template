@@ -7,7 +7,7 @@ AR=$(TOOLCHAIN_PREFIX)/bin/pic32-ar
 CPUTYPE=32MX795F512L
 VARIANT=Max32
 
-CFLAGS=-O0 -c -mno-smart-io -w -fno-exceptions -ffunction-sections -fdata-sections \
+CFLAGS=-O2 -c -mno-smart-io -w -fno-exceptions -ffunction-sections -fdata-sections \
 			 -g -mdebugger -Wcast-align -fno-short-double -mprocessor=$(CPUTYPE) \
 			 -DF_CPU=80000000L -DARDUINO=23 -D_BOARD_MEGA_ -DMPIDEVER=0x01000202 \
 			 -DMPIDE=23 -Ivariants/$(VARIANT) -I.

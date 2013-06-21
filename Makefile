@@ -24,7 +24,7 @@ LDSCRIPT=core/chipKIT-application-32MX795F512.ld
 
 LDFLAGS=-Os -Wl,--gc-sections -mdebugger -mprocessor=$(CPUTYPE)
 
-CFLAGS=-O0 -mno-smart-io -w -fno-exceptions -ffunction-sections -fdata-sections \
+CFLAGS=-O2 -mno-smart-io -w -fno-exceptions -ffunction-sections -fdata-sections \
 			 -g -mdebugger -Wcast-align -fno-short-double -mprocessor=$(CPUTYPE) \
 			 -DF_CPU=80000000L -DARDUINO=23 -D_BOARD_MEGA_ -DMPIDEVER=00x01000305 \
 			 -DMPIDE=23 -Icore -Icore/variants/$(VARIANT) -Isrc

@@ -81,7 +81,7 @@ core/core.a:
 %.i: %.c
 	$(CXX) $(CFLAGS) $< -o $@
 
-link: core/core.a $(LIB_OBJ_CPP) $(LIB_OBJ_C) $(OBJ_S) $(OBJ_C) $(OBJ_CPP)
+link: core/core.a $(LIB_OBJ_S) $(LIB_OBJ_CPP) $(LIB_OBJ_C) $(OBJ_S) $(OBJ_C) $(OBJ_CPP)
 	$(LD) $(LDFLAGS) -o bin/main.elf $(OBJ_CPP) $(LIB_OBJ_CPP) $(LIB_OBJ_C) core/core.a -lm -T $(LDSCRIPT) -T$(LDSCRIPT_COMMON) 
 hex: link
 	$(OBJCPY) -O ihex -j .eeprom --set-section-flags=.eeprom=alloc,load \

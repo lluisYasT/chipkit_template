@@ -108,7 +108,7 @@ core.a: $(CORE_OBJ_S) $(CORE_OBJ_C) $(CORE_OBJ_CPP)
 
 link: core.a $(LIB_OBJ_CPP) $(LIB_OBJ_C) $(OBJ_S) $(OBJ_C) $(OBJ_CPP)
 	- @if [[ ! -d bin ]]; then mkdir bin; fi
-	$(LD) $(LDFLAGS) -o bin/main.elf $(OBJ_CPP) $(LIB_OBJ_CPP) $(LIB_OBJ_C) core.a -lm -T $(LDSCRIPT) -T$(LDSCRIPT_COMMON) 
+	$(LD) $(LDFLAGS) -o bin/main.elf $(OBJ_CPP) $(OBJ_S) $(OBJ_C) $(LIB_OBJ_CPP) $(LIB_OBJ_C) core.a -lm -T $(LDSCRIPT) -T$(LDSCRIPT_COMMON) 
 
 hex: link
 	$(OBJCPY) -O ihex -j .eeprom --set-section-flags=.eeprom=alloc,load \
